@@ -82,6 +82,7 @@ Panel {
   property string eventDescription: ""
   property bool eventSubmitting: false
   property string eventErrorMessage: ""
+  property string configErrorMessage: ""
   property string pendingEventPayloadJson: ""
   property string pendingDeletePayloadJson: ""
   readonly property var writableCalendars: Model.getWritableCalendars(root.configuredCalendars)
@@ -199,7 +200,9 @@ Panel {
   }
 
   function saveCalendars(list) {
-    pendingConfigJson = JSON.stringify(list, null, 2)
+    // Single line: fetch-events.py reads the payload with readline() because
+    // the process keeps stdin open, so indented JSON arrived as just "[".
+    pendingConfigJson = JSON.stringify(list)
     saveConfigProc.command = [
       "python3",
       Qt.resolvedUrl("fetch-events.py").toString().replace(/^file:\/\//, ""),
@@ -638,6 +641,11 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         root.pendingConfigJson = ""
+        var result = null
+        try { result = JSON.parse(text) } catch (e) {}
+        root.configErrorMessage = (result && result.status === "error")
+          ? "Could not save calendars: " + (result.message || "unknown error")
+          : ""
         configFile.reload()
         root.syncCalendars(true)
       }
@@ -1531,9 +1539,12 @@ Panel {
                 spacing: Style.space(8)
 
                 // Form Header
-                Row {
+                // Item, not Row: a Row ignores the close button's right anchor.
+                Item {
                   width: parent.width
+                  height: Math.max(Style.space(20), closeFormButton.implicitHeight)
                   Item {
+                    anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - Style.space(24)
                     height: Style.space(20)
                     Row {
@@ -1558,6 +1569,7 @@ Panel {
                     }
                   }
                   PanelActionButton {
+                    id: closeFormButton
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     iconText: "󰅖"
@@ -2669,6 +2681,17 @@ Panel {
               font.letterSpacing: 1
             }
 
+            Text {
+              textFormat: Text.PlainText
+              visible: root.configErrorMessage.length > 0
+              width: parent.width
+              text: root.configErrorMessage
+              color: Color.accent
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
             Repeater {
               model: root.configuredCalendars
 
@@ -2682,15 +2705,17 @@ Panel {
                 radius: Style.cornerRadius
                 color: Style.hoverFillFor(root.contentForeground, Color.accent)
 
-                Row {
-                  anchors.left: parent.left
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  anchors.margins: Style.space(10)
-                  spacing: Style.space(8)
+                // Anchored rather than a Row: the name column used to take a
+                // guessed width, which pushed the checkboxes and buttons out of line.
+                Item {
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.space(10)
+                  anchors.rightMargin: Style.space(10)
 
                   // Enable/Disable toggle
                   Rectangle {
+                    id: enableToggle
+                    anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     width: Style.space(16)
                     height: Style.space(16)
@@ -2723,6 +2748,9 @@ Panel {
 
                   // Color dot (click to cycle)
                   Rectangle {
+                    id: colorDot
+                    anchors.left: enableToggle.right
+                    anchors.leftMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
                     width: Style.space(12)
                     height: Style.space(12)
@@ -2743,8 +2771,12 @@ Panel {
 
                   // Name & Details
                   Column {
+                    id: nameColumn
+                    anchors.left: colorDot.right
+                    anchors.leftMargin: Style.space(8)
+                    anchors.right: reconnectButton.visible ? reconnectButton.left : deleteButton.left
+                    anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - Style.space(modelData.googleCalendarId ? 170 : 140)
                     spacing: Style.space(2)
 
                     Row {
@@ -2752,6 +2784,8 @@ Panel {
                       Text {
                         textFormat: Text.PlainText
                         text: modelData.name || "Untitled"
+                        width: Math.min(implicitWidth, nameColumn.width - typeLabel.implicitWidth - Style.space(6))
+                        elide: Text.ElideRight
                         color: modelData.enabled !== false ? root.contentForeground : Qt.darker(root.contentForeground, 2.0)
                         font.family: root.contentFontFamily
                         font.pixelSize: Style.font.bodySmall
@@ -2759,6 +2793,7 @@ Panel {
                       }
 
                       Text {
+                        id: typeLabel
                         textFormat: Text.PlainText
                         text: (modelData.type === "jmap" || modelData.jmapToken) ? "JMAP" : (modelData.googleCalendarId ? "GOOGLE API" : "ICAL FEED")
                         color: Qt.darker(root.contentForeground, 1.9)
@@ -2789,7 +2824,10 @@ Panel {
 
                   // Reconnect Google account (Google API calendars only)
                   PanelActionButton {
+                    id: reconnectButton
                     visible: !!modelData.googleCalendarId
+                    anchors.right: deleteButton.left
+                    anchors.rightMargin: Style.space(4)
                     anchors.verticalCenter: parent.verticalCenter
                     iconText: "󰌆"
                     tooltipText: root.googleAuthRunning ? "Waiting for Google sign-in..." : "Reconnect Google account"
@@ -2800,6 +2838,8 @@ Panel {
 
                   // Delete button
                   PanelActionButton {
+                    id: deleteButton
+                    anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     iconText: "󰆴"
                     tooltipText: "Delete calendar"
