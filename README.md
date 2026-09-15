@@ -146,6 +146,29 @@ Configure your calendar feeds and preferences using the in-app **Settings Menu (
 
 Edits to `calendars.json` hot-reload automatically without restarting the shell.
 
+### Merging calendars, brand glyphs and colors
+
+- `"group": "Work"` on two or more entries shows them as one calendar named after the group, in the color of the member with that name. The same meeting on two members shows once, and deleting still reaches the real calendar.
+- `"icon"` + `"iconFont"` (the fields the Omarchy menu uses) put a glyph in the calendar's color on its event cards, filter chip and settings row.
+- Google API calendars follow their color in Google Calendar on every sync. Add `"syncColor": false` to keep the color set here.
+
+### Theming
+
+A theme can style the panel with an optional `[calendar]` section in its `shell.toml`, most easily by shipping `shell.calendar.toml` next to its `colors.toml` (Omarchy merges `shell.<section>.toml` files into the generated `shell.toml`). Every key is optional and falls back to the shell's own styling:
+
+```toml
+[calendar]
+font        = "menu"      # text family; "menu" follows OMARCHY_MENU_FONT. Icons keep the Nerd Font.
+hero-font   = "menu"      # the date headline; defaults to font
+hero-weight = 600         # numeric weight of the headline; defaults to bold
+hero        = "#EDEBE7"   # headline color; defaults to the bar text color
+accent      = "#19E030"   # defaults to the theme accent
+today       = "#19E030"   # today's cell; defaults to accent
+progress    = "#19E030"   # year progress bar; defaults to the selected-state color
+```
+
+Secondary text is dimmed by blending toward the panel background, so it reads correctly on light themes.
+
 ## Getting Calendar Links
 
 ### Google Calendar (Private iCal)
