@@ -73,6 +73,27 @@ Panel {
   }
   property bool agendaCopied: false
 
+  // Today's agenda hides meetings that have already ended behind one
+  // "N earlier" row (all-day events stay on top). Other days list everything.
+  property bool showEarlier: false
+  readonly property var agendaRows: {
+    var list = root.displayedEvents || []
+    if (root.selectedDateKey !== root.todayKey) return list
+    var allDay = [], ended = [], upcoming = []
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i]
+      if (e.allDay) allDay.push(e)
+      else if (root.eventHasEnded(e, root.selectedDateKey, root.now)) ended.push(e)
+      else upcoming.push(e)
+    }
+    if (ended.length === 0) return list
+    // Placeholder fields keep the (hidden) event card bindings quiet on this row.
+    var toggle = { kind: "earlier", count: ended.length, id: "earlier", title: "", calendar: "",
+                   sourceCalendar: "", color: "", allDay: false, startIso: "", startTime: "", endTime: "",
+                   location: "", description: "", meetingUrl: "", meetingProvider: "", writable: false }
+    return allDay.concat([toggle], root.showEarlier ? ended : [], upcoming)
+  }
+
   // ---- Event Creation & Management State
   property bool addingEvent: false
   property string eventTitle: ""
@@ -385,6 +406,7 @@ Panel {
     syncCalendars(false)
     eventsFile.reload()
     root.now = new Date()
+    root.showEarlier = false
     root.controller.show()
     focusTimer.restart()
     // Set after showing, not before: showing hands the popout coordinator
@@ -2114,34 +2136,12 @@ Panel {
               clip: true
               boundsBehavior: Flickable.StopAtBounds
               interactive: contentHeight > height
-              onEventsChanged: focusTimer.restart()
+              onEventsChanged: { root.showEarlier = false; focusTimer.restart() }
 
-              // Today: bring the first meeting that hasn't ended to the top
-              // (or the last one when the day is over). Other days start at
-              // the top. Heights are summed from the delegates, so this works
-              // before the Column has re-laid itself out.
+              // Open at the top: all-day events, the collapsed "earlier" row, then
+              // the next meeting. Ended meetings stay out of the way until expanded.
               function focusUpcoming() {
-                var list = root.displayedEvents || []
-                var target = 0
-                if (root.selectedDateKey === root.todayKey && list.length > 0) {
-                  target = list.length - 1
-                  for (var i = 0; i < list.length; i++) {
-                    if (!list[i].allDay && !root.eventHasEnded(list[i], root.selectedDateKey, root.now)) {
-                      target = i
-                      break
-                    }
-                  }
-                }
-                var y = 0
-                var total = 0
-                for (var j = 0; j < agendaRepeater.count; j++) {
-                  var item = agendaRepeater.itemAt(j)
-                  if (!item) continue
-                  if (j < target) y += item.height + agendaEventsColumn.spacing
-                  total += item.height + (j > 0 ? agendaEventsColumn.spacing : 0)
-                }
-                var viewport = Math.min(total, Math.max(Style.space(180), availableHeight))
-                contentY = Math.max(0, Math.min(y, total - viewport))
+                contentY = 0
               }
 
               Timer {
@@ -2157,13 +2157,69 @@ Panel {
 
                 Repeater {
                   id: agendaRepeater
-                  model: root.displayedEvents
+                  model: root.agendaRows
+
+                  Item {
+                    id: agendaRow
+                    required property var modelData
+                    readonly property bool isEarlierToggle: modelData.kind === "earlier"
+                    width: agendaSection.width
+                    height: isEarlierToggle ? earlierToggle.height : eventCard.height
+
+                    // "N earlier" row: shows or hides today's ended meetings.
+                    Rectangle {
+                      id: earlierToggle
+                      visible: agendaRow.isEarlierToggle
+                      width: parent.width
+                      height: Style.space(30)
+                      radius: Style.cornerRadius
+                      color: earlierMouse.containsMouse ? Style.hoverFillFor(root.contentForeground, Color.accent) : "transparent"
+                      border.width: Style.spacing.hairline
+                      border.color: root.dimmed(2.2)
+
+                      Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: Style.space(12)
+                        spacing: Style.space(8)
+
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          textFormat: Text.PlainText
+                          text: root.showEarlier ? "\u{f0143}" : "\u{f0140}"
+                          color: root.dimmed(1.4)
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.bodySmall
+                        }
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          textFormat: Text.PlainText
+                          text: root.showEarlier
+                            ? "Hide earlier meetings"
+                            : agendaRow.modelData.count + (agendaRow.modelData.count === 1 ? " earlier meeting" : " earlier meetings")
+                          color: root.dimmed(1.4)
+                          font.family: root.textFontFamily
+                          font.pixelSize: Style.font.caption
+                          font.bold: true
+                          font.letterSpacing: 0.5
+                        }
+                      }
+
+                      MouseArea {
+                        id: earlierMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.showEarlier = !root.showEarlier
+                      }
+                    }
 
                   Rectangle {
-                    required property var modelData
+                    id: eventCard
+                    visible: !agendaRow.isEarlierToggle
                     readonly property bool ended: root.eventHasEnded(modelData, root.selectedDateKey, root.now)
                     readonly property var glyph: root.calendarGlyph(modelData.calendar)
-                    width: agendaSection.width
+                    width: parent.width
                     height: Math.max(eventContentCol.implicitHeight, glyph ? cardGlyph.height : 0) + Style.space(12)
                     opacity: ended ? 0.45 : 1.0
                     radius: Style.cornerRadius
@@ -2355,6 +2411,7 @@ Panel {
                         }
                       }
                     }
+                  }
                   }
                 }
               }
