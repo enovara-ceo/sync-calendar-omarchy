@@ -2102,8 +2102,9 @@ Panel {
                   Rectangle {
                     required property var modelData
                     readonly property bool ended: root.eventHasEnded(modelData, root.selectedDateKey, root.now)
+                    readonly property var glyph: root.calendarGlyph(modelData.calendar)
                     width: agendaSection.width
-                    height: eventContentCol.implicitHeight + Style.space(12)
+                    height: Math.max(eventContentCol.implicitHeight, glyph ? cardGlyph.height : 0) + Style.space(12)
                     opacity: ended ? 0.45 : 1.0
                     radius: Style.cornerRadius
                     color: Style.hoverFillFor(root.contentForeground, Color.accent)
@@ -2116,6 +2117,26 @@ Panel {
                       anchors.margins: Style.space(4)
                       width: Style.space(3)
                       radius: Style.cornerRadius > 0 ? width / 2 : 0
+                      color: modelData.color || Color.accent
+                    }
+
+                    // Calendar brand glyph (calendars.json "icon" + "iconFont") leading the
+                    // card, in the calendar's color. Fixed slot so card text lines up.
+                    Text {
+                      id: cardGlyph
+                      readonly property var glyph: parent.glyph
+                      visible: !!glyph
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(14)
+                      anchors.top: eventContentCol.top
+                      width: Style.space(26)
+                      height: Style.space(26)
+                      horizontalAlignment: Text.AlignHCenter
+                      verticalAlignment: Text.AlignVCenter
+                      textFormat: Text.PlainText
+                      text: glyph ? glyph.icon : ""
+                      font.family: glyph && glyph.iconFont ? glyph.iconFont : root.contentFontFamily
+                      font.pixelSize: Style.font.display
                       color: modelData.color || Color.accent
                     }
 
@@ -2138,7 +2159,7 @@ Panel {
                       anchors.left: parent.left
                       anchors.right: parent.right
                       anchors.verticalCenter: parent.verticalCenter
-                      anchors.leftMargin: Style.space(14)
+                      anchors.leftMargin: cardGlyph.visible ? Style.space(14) + cardGlyph.width + Style.space(10) : Style.space(14)
                       anchors.rightMargin: modelData.writable ? Style.space(32) : Style.space(10)
                       spacing: Style.space(2)
 
@@ -2156,20 +2177,9 @@ Panel {
                         }
 
                         Text {
-                          readonly property var glyph: root.calendarGlyph(modelData.calendar)
-                          visible: modelData.calendar !== "" && !!glyph
-                          textFormat: Text.PlainText
-                          text: glyph ? glyph.icon : ""
-                          font.family: glyph && glyph.iconFont ? glyph.iconFont : root.contentFontFamily
-                          font.pixelSize: Style.font.caption
-                          color: modelData.color || Color.accent
-                        }
-
-                        Text {
                           textFormat: Text.PlainText
                           visible: modelData.calendar !== ""
-                          // The brand glyph stands in for the separator dot.
-                          text: (root.calendarGlyph(modelData.calendar) ? "" : "· ") + modelData.calendar.toUpperCase()
+                          text: "· " + modelData.calendar.toUpperCase()
                           color: Qt.darker(root.contentForeground, 1.8)
                           font.family: root.contentFontFamily
                           font.pixelSize: Style.font.caption
