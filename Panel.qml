@@ -37,6 +37,9 @@ Panel {
   // ---- Today. SystemClock keeps this honest across midnight so the
   //      highlight rolls over without the panel being reopened.
   property date today: new Date()
+  // Ticks every minute (today only changes at midnight); drives graying out
+  // meetings that have already ended.
+  property date now: new Date()
   readonly property string todayKey: Model.keyForDate(today)
 
   // ---- Selected date for the Agenda view
@@ -331,7 +334,9 @@ Panel {
     refresh()
     syncCalendars(false)
     eventsFile.reload()
+    root.now = new Date()
     root.controller.show()
+    focusTimer.restart()
     // Set after showing, not before: showing hands the popout coordinator
     // over, which closes whichever panel was open, and that close clears the
     // shared flag. Deferring means the panel taking over always wins, while
@@ -523,6 +528,29 @@ Panel {
     var start = Model.formatEventTime(event.startTime, root.clockHourCycle)
     var end = Model.formatEventTime(event.endTime, root.clockHourCycle)
     return start + (end ? (separator || " – ") + end : "")
+  }
+
+  // When an event stops being current on dayKey, in ms. Multi-day events keep
+  // their original startIso, so on a later day they end at endTime that day.
+  function eventEndMs(event, dayKey) {
+    if (!event || !event.startIso) return NaN
+    var startDay = String(event.startIso).slice(0, 10)
+    if (event.allDay) {
+      var dayEnd = new Date(dayKey + "T00:00:00")
+      dayEnd.setDate(dayEnd.getDate() + 1)
+      return dayEnd.getTime()
+    }
+    var startMs = new Date(event.startIso).getTime()
+    if (!event.endTime) return startDay === dayKey ? startMs + 3600000 : NaN
+    var end = new Date(dayKey + "T" + event.endTime + ":00")
+    // Ends after midnight: the end time belongs to the next day.
+    if (startDay === dayKey && end.getTime() <= startMs) end.setDate(end.getDate() + 1)
+    return end.getTime()
+  }
+
+  function eventHasEnded(event, dayKey, nowDate) {
+    var endMs = root.eventEndMs(event, dayKey)
+    return !isNaN(endMs) && endMs <= nowDate.getTime()
   }
 
   function setWeekStart(day) {
@@ -720,6 +748,7 @@ Panel {
     id: clock
     precision: SystemClock.Minutes
     onDateChanged: {
+      root.now = clock.date
       root.checkUpcomingNotifications()
       if (Model.keyForDate(clock.date) === String(root.todayKey)) return
       var followToday = root.viewingCurrentMonth
@@ -1986,7 +2015,41 @@ Panel {
               clip: true
               boundsBehavior: Flickable.StopAtBounds
               interactive: contentHeight > height
-              onEventsChanged: contentY = 0
+              onEventsChanged: focusTimer.restart()
+
+              // Today: bring the first meeting that hasn't ended to the top
+              // (or the last one when the day is over). Other days start at
+              // the top. Heights are summed from the delegates, so this works
+              // before the Column has re-laid itself out.
+              function focusUpcoming() {
+                var list = root.displayedEvents || []
+                var target = 0
+                if (root.selectedDateKey === root.todayKey && list.length > 0) {
+                  target = list.length - 1
+                  for (var i = 0; i < list.length; i++) {
+                    if (!list[i].allDay && !root.eventHasEnded(list[i], root.selectedDateKey, root.now)) {
+                      target = i
+                      break
+                    }
+                  }
+                }
+                var y = 0
+                var total = 0
+                for (var j = 0; j < agendaRepeater.count; j++) {
+                  var item = agendaRepeater.itemAt(j)
+                  if (!item) continue
+                  if (j < target) y += item.height + agendaEventsColumn.spacing
+                  total += item.height + (j > 0 ? agendaEventsColumn.spacing : 0)
+                }
+                var viewport = Math.min(total, Math.max(Style.space(180), availableHeight))
+                contentY = Math.max(0, Math.min(y, total - viewport))
+              }
+
+              Timer {
+                id: focusTimer
+                interval: 50
+                onTriggered: agendaScroll.focusUpcoming()
+              }
 
               Column {
                 id: agendaEventsColumn
@@ -1994,12 +2057,15 @@ Panel {
                 spacing: Style.space(6)
 
                 Repeater {
+                  id: agendaRepeater
                   model: root.displayedEvents
 
                   Rectangle {
                     required property var modelData
+                    readonly property bool ended: root.eventHasEnded(modelData, root.selectedDateKey, root.now)
                     width: agendaSection.width
                     height: eventContentCol.implicitHeight + Style.space(12)
+                    opacity: ended ? 0.45 : 1.0
                     radius: Style.cornerRadius
                     color: Style.hoverFillFor(root.contentForeground, Color.accent)
 
