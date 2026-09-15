@@ -2806,6 +2806,94 @@ def get_writable_calendars():
     return writables
 
 
+def calendar_groups(calendars):
+    """Map each grouped calendar's name to the (name, color) it displays as.
+
+    Calendars sharing a "group" value read as one calendar: they take the
+    group's name, and the color of the member named after the group (or the
+    first member's color when none is).
+    """
+    members = {}
+    for c in calendars:
+        group = str(c.get("group") or "").strip()
+        if group:
+            members.setdefault(group, []).append(c)
+
+    display = {}
+    for group, cals in members.items():
+        named = next((c for c in cals if str(c.get("name", "")).strip() == group), cals[0])
+        color = named.get("color") or "#4A90E2"
+        for c in cals:
+            display[str(c.get("name", ""))] = (group, color)
+    return display
+
+
+def attach_calendar_icons(calendars, statuses):
+    """Copy each calendar's optional glyph ("icon" + "iconFont") onto its status.
+
+    A merged group shows the glyph of the member named after the group, or the
+    first member that has one.
+    """
+    icons = {}
+    for c in calendars:
+        if c.get("icon"):
+            icons[str(c.get("name", ""))] = {"icon": str(c["icon"]), "iconFont": str(c.get("iconFont") or "")}
+    for c in calendars:
+        group = str(c.get("group") or "").strip()
+        if not group or group in icons:
+            continue
+        named = next((m for m in calendars if str(m.get("name", "")) == group and m.get("icon")), None)
+        member = named or next((m for m in calendars if str(m.get("group") or "").strip() == group and m.get("icon")), None)
+        if member:
+            icons[group] = {"icon": str(member["icon"]), "iconFont": str(member.get("iconFont") or "")}
+
+    return [dict(s, **icons[s.get("name")]) if s.get("name") in icons else s for s in statuses]
+
+
+def merge_grouped_calendars(calendars, events, statuses):
+    """Fold grouped calendars into one: relabel events, drop repeats, merge statuses."""
+    groups = calendar_groups(calendars)
+    if not groups:
+        return events, statuses
+
+    merged_events = []
+    seen = set()
+    for evt in events:
+        if not isinstance(evt, dict):
+            continue
+        source = str(evt.get("calendar") or "")
+        if source in groups:
+            name, color = groups[source]
+            # The same meeting on two member calendars shows once.
+            key = (name, evt.get("date_key"), str(evt.get("start_dt")), str(evt.get("end_dt")), evt.get("title"))
+            if key in seen:
+                continue
+            seen.add(key)
+            evt = dict(evt, calendar=name, color=color, sourceCalendar=source)
+        merged_events.append(evt)
+
+    merged_statuses = []
+    by_group = {}
+    for status in statuses:
+        source = str(status.get("name") or "")
+        if source not in groups:
+            merged_statuses.append(status)
+            continue
+        name, color = groups[source]
+        if name not in by_group:
+            by_group[name] = dict(status, name=name, color=color, count=0, members=[])
+            merged_statuses.append(by_group[name])
+        entry = by_group[name]
+        entry["members"].append(source)
+        entry["writable"] = bool(entry.get("writable")) or bool(status.get("writable"))
+        if entry.get("status") == "ok" and status.get("status") != "ok":
+            entry["status"] = status.get("status")
+
+    for entry in by_group.values():
+        entry["count"] = sum(1 for e in merged_events if e.get("calendar") == entry["name"])
+    return merged_events, merged_statuses
+
+
 def sync_all_events():
     """Fetch all configured and local calendars and write calendar-events.json."""
     ensure_config_exists()
@@ -2881,6 +2969,9 @@ def sync_all_events():
                         "count": 0,
                     })
 
+    all_events, cal_statuses = merge_grouped_calendars(enabled_cals, all_events, cal_statuses)
+    cal_statuses = attach_calendar_icons(enabled_cals, cal_statuses)
+
     events_by_date = {}
     for evt in all_events:
         if not isinstance(evt, dict):
@@ -2912,6 +3003,8 @@ def sync_all_events():
             "id": str(evt.get("id", "")),
             "title": str(evt.get("title") or "(Untitled Event)"),
             "calendar": str(evt.get("calendar") or "Calendar"),
+            # The real calendar behind a merged group; delete targets this.
+            "sourceCalendar": str(evt.get("sourceCalendar") or evt.get("calendar") or "Calendar"),
             "calendarId": str(evt.get("calendarId", "")),
             "calendarType": str(evt.get("calendarType", "ical")),
             "writable": bool(evt.get("writable", False)),

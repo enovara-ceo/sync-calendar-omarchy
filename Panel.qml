@@ -155,7 +155,8 @@ Panel {
     if (!evt || !evt.id) return
     var payload = {
       id: evt.id,
-      calendar: evt.calendar || "Local Calendar",
+      // A merged group's events carry their real calendar in sourceCalendar.
+      calendar: evt.sourceCalendar || evt.calendar || "Local Calendar",
       calendarId: evt.calendarId || "",
       calendarType: evt.calendarType || "local"
     }
@@ -551,6 +552,22 @@ Panel {
   function eventHasEnded(event, dayKey, nowDate) {
     var endMs = root.eventEndMs(event, dayKey)
     return !isNaN(endMs) && endMs <= nowDate.getTime()
+  }
+
+  // Brand glyph for a calendar name, from calendars.json "icon" + "iconFont"
+  // (the same fields the Omarchy menu uses). The synced list covers merged
+  // groups; the config covers calendars that are not synced yet.
+  function calendarGlyph(name) {
+    var key = String(name || "")
+    var lists = [root.activeCalendars || [], root.configuredCalendars || []]
+    for (var l = 0; l < lists.length; l++) {
+      for (var i = 0; i < lists[l].length; i++) {
+        var c = lists[l][i]
+        if (c && String(c.name || "") === key && c.icon)
+          return { icon: String(c.icon), iconFont: String(c.iconFont || "") }
+      }
+    }
+    return null
   }
 
   function setWeekStart(day) {
@@ -1651,10 +1668,21 @@ Panel {
                           anchors.centerIn: parent
                           spacing: Style.space(5)
                           Rectangle {
+                            visible: !root.calendarGlyph(modelData.name)
                             anchors.verticalCenter: parent.verticalCenter
                             width: Style.space(6)
                             height: Style.space(6)
                             radius: 3
+                            color: modelData.color || Color.accent
+                          }
+                          Text {
+                            readonly property var glyph: root.calendarGlyph(modelData.name)
+                            visible: !!glyph
+                            anchors.verticalCenter: parent.verticalCenter
+                            textFormat: Text.PlainText
+                            text: glyph ? glyph.icon : ""
+                            font.family: glyph && glyph.iconFont ? glyph.iconFont : root.contentFontFamily
+                            font.pixelSize: Style.font.bodySmall
                             color: modelData.color || Color.accent
                           }
                           Text {
@@ -1962,10 +1990,21 @@ Panel {
                         spacing: Style.space(5)
 
                         Rectangle {
+                          visible: !calChip.modelData.icon
                           anchors.verticalCenter: parent.verticalCenter
                           width: Style.space(6)
                           height: Style.space(6)
                           radius: Style.cornerRadius > 0 ? 3 : 0
+                          color: calChip.calColor
+                        }
+
+                        Text {
+                          visible: !!calChip.modelData.icon
+                          anchors.verticalCenter: parent.verticalCenter
+                          textFormat: Text.PlainText
+                          text: calChip.modelData.icon || ""
+                          font.family: calChip.modelData.iconFont || root.contentFontFamily
+                          font.pixelSize: Style.font.bodySmall
                           color: calChip.calColor
                         }
 
@@ -2117,9 +2156,20 @@ Panel {
                         }
 
                         Text {
+                          readonly property var glyph: root.calendarGlyph(modelData.calendar)
+                          visible: modelData.calendar !== "" && !!glyph
+                          textFormat: Text.PlainText
+                          text: glyph ? glyph.icon : ""
+                          font.family: glyph && glyph.iconFont ? glyph.iconFont : root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                          color: modelData.color || Color.accent
+                        }
+
+                        Text {
                           textFormat: Text.PlainText
                           visible: modelData.calendar !== ""
-                          text: "· " + modelData.calendar.toUpperCase()
+                          // The brand glyph stands in for the separator dot.
+                          text: (root.calendarGlyph(modelData.calendar) ? "" : "· ") + modelData.calendar.toUpperCase()
                           color: Qt.darker(root.contentForeground, 1.8)
                           font.family: root.contentFontFamily
                           font.pixelSize: Style.font.caption
@@ -2836,10 +2886,21 @@ Panel {
                     anchors.left: enableToggle.right
                     anchors.leftMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(12)
-                    height: Style.space(12)
+                    width: modelData.icon ? Style.space(16) : Style.space(12)
+                    height: modelData.icon ? Style.space(16) : Style.space(12)
                     radius: width / 2
-                    color: modelData.color || Color.accent
+                    color: modelData.icon ? "transparent" : (modelData.color || Color.accent)
+
+                    // Brand glyph in the calendar's color; clicking still cycles the color.
+                    Text {
+                      visible: !!modelData.icon
+                      anchors.centerIn: parent
+                      textFormat: Text.PlainText
+                      text: modelData.icon || ""
+                      font.family: modelData.iconFont || root.contentFontFamily
+                      font.pixelSize: Style.font.body
+                      color: modelData.color || Color.accent
+                    }
 
                     MouseArea {
                       anchors.fill: parent
