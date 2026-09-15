@@ -570,6 +570,17 @@ Panel {
     return null
   }
 
+  // Color a configured calendar shows as: Google's, when the last sync brought
+  // one for it, otherwise the color saved in calendars.json.
+  function syncedGoogleColor(cal) {
+    var colors = eventsData.googleColors || {}
+    return cal && cal.googleCalendarId ? String(colors[cal.googleCalendarId] || "") : ""
+  }
+
+  function configuredCalendarColor(cal) {
+    return root.syncedGoogleColor(cal) || (cal && cal.color) || Color.accent
+  }
+
   function setWeekStart(day) {
     var next = Model.normalizedWeekStart(day, root.weekStart)
     if (next === root.weekStart) return
@@ -2899,9 +2910,10 @@ Panel {
                     width: modelData.icon ? Style.space(16) : Style.space(12)
                     height: modelData.icon ? Style.space(16) : Style.space(12)
                     radius: width / 2
-                    color: modelData.icon ? "transparent" : (modelData.color || Color.accent)
+                    readonly property bool colorFromGoogle: root.syncedGoogleColor(modelData) !== ""
+                    color: modelData.icon ? "transparent" : root.configuredCalendarColor(modelData)
 
-                    // Brand glyph in the calendar's color; clicking still cycles the color.
+                    // Brand glyph in the calendar's color.
                     Text {
                       visible: !!modelData.icon
                       anchors.centerIn: parent
@@ -2909,17 +2921,19 @@ Panel {
                       text: modelData.icon || ""
                       font.family: modelData.iconFont || root.contentFontFamily
                       font.pixelSize: Style.font.body
-                      color: modelData.color || Color.accent
+                      color: root.configuredCalendarColor(modelData)
                     }
 
+                    // Google owns the color of a synced Google calendar; cycling
+                    // it here would be overwritten on the next sync.
                     MouseArea {
                       anchors.fill: parent
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: root.cycleColorForCalendar(calItemRow.index)
+                      cursorShape: colorDot.colorFromGoogle ? Qt.ArrowCursor : Qt.PointingHandCursor
+                      onClicked: if (!colorDot.colorFromGoogle) root.cycleColorForCalendar(calItemRow.index)
                     }
 
                     PanelToolTip {
-                      text: "Click to change color"
+                      text: colorDot.colorFromGoogle ? "Color follows Google Calendar" : "Click to change color"
                       fontFamily: root.contentFontFamily
                     }
                   }

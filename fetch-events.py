@@ -2806,6 +2806,53 @@ def get_writable_calendars():
     return writables
 
 
+def fetch_google_calendar_colors():
+    """Return {calendarId: color} from the signed-in user's Google calendar list.
+
+    The primary calendar is also reachable as "primary". Returns {} when Google
+    is unavailable, so callers keep the colors from calendars.json.
+    """
+    token = get_google_access_token()
+    if not token:
+        return {}
+    colors = {}
+    page_token = None
+    try:
+        for _ in range(GOOGLE_MAX_PAGES):
+            query = {"maxResults": "250", "showHidden": "true"}
+            if page_token:
+                query["pageToken"] = page_token
+            req = urllib.request.Request(
+                "https://www.googleapis.com/calendar/v3/users/me/calendarList?" + urllib.parse.urlencode(query),
+                headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(safe_read_bytes(resp, max_bytes=MAX_API_BYTES).decode("utf-8"))
+            for item in data.get("items", []):
+                color = item.get("backgroundColor")
+                if item.get("id") and color:
+                    colors[item["id"]] = color
+                    if item.get("primary"):
+                        colors["primary"] = color
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+    except Exception:
+        return {}
+    return colors
+
+
+def apply_google_colors(calendars, colors):
+    """Give each Google calendar its color from Google, unless it sets "syncColor": false."""
+    applied = []
+    for c in calendars:
+        cal_id = c.get("googleCalendarId")
+        if cal_id and c.get("syncColor", True) is not False and colors.get(cal_id):
+            c = dict(c, color=colors[cal_id])
+        applied.append(c)
+    return applied
+
+
 def calendar_groups(calendars):
     """Map each grouped calendar's name to the (name, color) it displays as.
 
@@ -2935,6 +2982,13 @@ def sync_all_events():
         except Exception:
             pass
 
+    # Colors follow Google Calendar: one calendarList read per sync, applied
+    # before fetching so events, chips and merged groups all use them.
+    google_colors = {}
+    if any(isinstance(c, dict) and c.get("googleCalendarId") and c.get("syncColor", True) is not False for c in calendars):
+        google_colors = fetch_google_calendar_colors()
+        enabled_cals = apply_google_colors(enabled_cals, google_colors)
+
     all_events = []
     cal_statuses = []
 
@@ -3035,6 +3089,12 @@ def sync_all_events():
         "lastSyncedFormatted": now.strftime("%H:%M"),
         "totalEvents": len(all_events),
         "configuredCount": len(enabled_cals),
+        # Synced Google colors by calendar ID, for configured calendars that follow Google.
+        "googleColors": {
+            c["googleCalendarId"]: google_colors[c["googleCalendarId"]]
+            for c in calendars
+            if isinstance(c, dict) and c.get("googleCalendarId") in google_colors and c.get("syncColor", True) is not False
+        },
         "authenticated": google_auth["authenticated"],
         "googleAuth": google_auth,
         "calendars": cal_statuses,
