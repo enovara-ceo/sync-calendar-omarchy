@@ -1027,6 +1027,9 @@ def parse_ics(content, cal_info, window_start, window_end):
 
 AUTH_FILE = os.path.join(STATE_DIR, "google-auth.json")
 
+# Upper bound on events.list pages per calendar (250 events each).
+GOOGLE_MAX_PAGES = 20
+
 # Google answers "invalid_grant" when a refresh token can never be used again.
 # The usual cause is an OAuth app left in "Testing" publishing status: Google
 # expires those refresh tokens after 7 days, so the calendar silently drops
@@ -1216,26 +1219,38 @@ def fetch_google_api_calendar(cal_info, window_start, window_end):
     time_min = window_start.strftime("%Y-%m-%dT00:00:00Z")
     time_max = window_end.strftime("%Y-%m-%dT23:59:59Z")
 
-    params = urllib.parse.urlencode({
-        "timeMin": time_min,
-        "timeMax": time_max,
-        "singleEvents": "true",
-        "orderBy": "startTime",
-        "maxResults": "250",
-    })
-
-    url = f"https://www.googleapis.com/calendar/v3/calendars/{encoded_cal_id}/events?{params}"
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {access_token}",
-        "User-Agent": USER_AGENT,
-    })
-
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            raw = safe_read_bytes(resp, max_bytes=MAX_API_BYTES)
-            data = json.loads(raw.decode("utf-8"))
+        # Google caps each response at 250 events; follow nextPageToken so busy
+        # calendars are not silently cut off partway through the sync window.
+        items = []
+        access_role = ""
+        page_token = None
+        for _ in range(GOOGLE_MAX_PAGES):
+            query = {
+                "timeMin": time_min,
+                "timeMax": time_max,
+                "singleEvents": "true",
+                "orderBy": "startTime",
+                "maxResults": "250",
+            }
+            if page_token:
+                query["pageToken"] = page_token
+            url = f"https://www.googleapis.com/calendar/v3/calendars/{encoded_cal_id}/events?{urllib.parse.urlencode(query)}"
+            req = urllib.request.Request(url, headers={
+                "Authorization": f"Bearer {access_token}",
+                "User-Agent": USER_AGENT,
+            })
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                raw = safe_read_bytes(resp, max_bytes=MAX_API_BYTES)
+                data = json.loads(raw.decode("utf-8"))
+            items.extend(data.get("items", []))
+            access_role = data.get("accessRole", access_role)
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
 
-        items = data.get("items", [])
+        # A calendar shared as free/busy only never carries event titles.
+        untitled = "Busy" if access_role == "freeBusyReader" else "(Untitled Event)"
         auto_translate = cal_info.get("translateKorean", False)
         events = []
 
@@ -1263,7 +1278,7 @@ def fetch_google_api_calendar(cal_info, window_start, window_end):
             else:
                 continue
 
-            title = item.get("summary", "(Untitled Event)")
+            title = item.get("summary") or untitled
             location = item.get("location", "")
             description = item.get("description", "")
 
@@ -2948,10 +2963,24 @@ def sync_all_events():
 
 def read_stdin_payload(max_bytes=MAX_CONFIG_BYTES):
     """Read JSON payload from stdin safely without blocking or deadlock."""
+    # Callers keep stdin open after writing, so read line by line and stop as
+    # soon as the text parses; a plain read() would wait for EOF forever.
     try:
-        line = sys.stdin.readline()
-        if line and line.strip():
-            return line
+        payload = ""
+        while len(payload) <= max_bytes:
+            line = sys.stdin.readline()
+            if not line:
+                break
+            payload += line
+            if not payload.strip():
+                continue
+            try:
+                json.loads(payload)
+                return payload
+            except ValueError:
+                continue
+        if payload.strip():
+            return payload
     except Exception:
         pass
     try:
