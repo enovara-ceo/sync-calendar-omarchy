@@ -1971,183 +1971,201 @@ Panel {
             }
 
             // Events List
-            Column {
-              width: parent.width
-              spacing: Style.space(6)
+            // Scrolls on its own so the calendar above stays in place; it takes
+            // whatever height is left on screen under the grid and header.
+            Flickable {
+              id: agendaScroll
+              readonly property real spaceAbove: mainCalendarSection.y + agendaSection.y + y
+              readonly property real availableHeight: panel.availableCardHeight - panel.verticalContentInset - spaceAbove
+              readonly property var events: root.displayedEvents
               visible: root.displayedEvents.length > 0
+              width: parent.width
+              height: visible ? Math.min(agendaEventsColumn.implicitHeight, Math.max(Style.space(180), availableHeight)) : 0
+              contentWidth: width
+              contentHeight: agendaEventsColumn.implicitHeight
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+              interactive: contentHeight > height
+              onEventsChanged: contentY = 0
 
-              Repeater {
-                model: root.displayedEvents
+              Column {
+                id: agendaEventsColumn
+                width: agendaScroll.width
+                spacing: Style.space(6)
 
-                Rectangle {
-                  required property var modelData
-                  width: agendaSection.width
-                  height: eventContentCol.implicitHeight + Style.space(12)
-                  radius: Style.cornerRadius
-                  color: Style.hoverFillFor(root.contentForeground, Color.accent)
+                Repeater {
+                  model: root.displayedEvents
 
-                  // Calendar color accent strip
                   Rectangle {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.margins: Style.space(4)
-                    width: Style.space(3)
-                    radius: Style.cornerRadius > 0 ? width / 2 : 0
-                    color: modelData.color || Color.accent
-                  }
+                    required property var modelData
+                    width: agendaSection.width
+                    height: eventContentCol.implicitHeight + Style.space(12)
+                    radius: Style.cornerRadius
+                    color: Style.hoverFillFor(root.contentForeground, Color.accent)
 
-                  // Delete button for writable events
-                  PanelActionButton {
-                    visible: Boolean(modelData.writable)
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: Style.space(4)
-                    iconText: "󰆴"
-                    tooltipText: "Delete event from " + (modelData.calendar || "calendar")
-                    foreground: root.contentForeground
-                    fontFamily: root.contentFontFamily
-                    opacity: 0.65
-                    onClicked: root.deleteEvent(modelData)
-                  }
+                    // Calendar color accent strip
+                    Rectangle {
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      anchors.bottom: parent.bottom
+                      anchors.margins: Style.space(4)
+                      width: Style.space(3)
+                      radius: Style.cornerRadius > 0 ? width / 2 : 0
+                      color: modelData.color || Color.accent
+                    }
 
-                  Column {
-                    id: eventContentCol
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.leftMargin: Style.space(14)
-                    anchors.rightMargin: modelData.writable ? Style.space(32) : Style.space(10)
-                    spacing: Style.space(2)
+                    // Delete button for writable events
+                    PanelActionButton {
+                      visible: Boolean(modelData.writable)
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      anchors.margins: Style.space(4)
+                      iconText: "󰆴"
+                      tooltipText: "Delete event from " + (modelData.calendar || "calendar")
+                      foreground: root.contentForeground
+                      fontFamily: root.contentFontFamily
+                      opacity: 0.65
+                      onClicked: root.deleteEvent(modelData)
+                    }
 
-                    Row {
-                      width: parent.width
-                      spacing: Style.space(6)
+                    Column {
+                      id: eventContentCol
+                      anchors.left: parent.left
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      anchors.leftMargin: Style.space(14)
+                      anchors.rightMargin: modelData.writable ? Style.space(32) : Style.space(10)
+                      spacing: Style.space(2)
+
+                      Row {
+                        width: parent.width
+                        spacing: Style.space(6)
+
+                        Text {
+                          textFormat: Text.PlainText
+                          text: modelData.allDay ? "ALL DAY" : root.eventTimeRange(modelData, " – ")
+                          color: Qt.darker(root.contentForeground, 1.4)
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                          font.bold: true
+                        }
+
+                        Text {
+                          textFormat: Text.PlainText
+                          visible: modelData.calendar !== ""
+                          text: "· " + modelData.calendar.toUpperCase()
+                          color: Qt.darker(root.contentForeground, 1.8)
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                          font.letterSpacing: 0.5
+                          elide: Text.ElideRight
+                        }
+                      }
 
                       Text {
                         textFormat: Text.PlainText
-                        text: modelData.allDay ? "ALL DAY" : root.eventTimeRange(modelData, " – ")
-                        color: Qt.darker(root.contentForeground, 1.4)
+                        width: parent.width
+                        text: modelData.title
+                        color: root.contentForeground
                         font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.body
                         font.bold: true
-                      }
-
-                      Text {
-                        textFormat: Text.PlainText
-                        visible: modelData.calendar !== ""
-                        text: "· " + modelData.calendar.toUpperCase()
-                        color: Qt.darker(root.contentForeground, 1.8)
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.caption
-                        font.letterSpacing: 0.5
                         elide: Text.ElideRight
                       }
-                    }
 
-                    Text {
-                      textFormat: Text.PlainText
-                      width: parent.width
-                      text: modelData.title
-                      color: root.contentForeground
-                      font.family: root.contentFontFamily
-                      font.pixelSize: Style.font.body
-                      font.bold: true
-                      elide: Text.ElideRight
-                    }
+                      Row {
+                        visible: modelData.location && modelData.location.length > 0
+                        width: parent.width
+                        spacing: Style.space(4)
 
-                    Row {
-                      visible: modelData.location && modelData.location.length > 0
-                      width: parent.width
-                      spacing: Style.space(4)
+                        Text {
+                          textFormat: Text.PlainText
+                          text: "󰍎"
+                          color: Qt.darker(root.contentForeground, 1.6)
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                        }
 
-                      Text {
-                        textFormat: Text.PlainText
-                        text: "󰍎"
-                        color: Qt.darker(root.contentForeground, 1.6)
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.caption
-                      }
+                        Text {
+                          textFormat: Text.PlainText
+                          width: parent.width - Style.space(16)
+                          text: modelData.location
+                          color: modelData.meetingUrl ? Color.accent : Qt.darker(root.contentForeground, 1.6)
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                          font.underline: Boolean(locMouse.containsMouse && modelData.meetingUrl)
+                          elide: Text.ElideRight
 
-                      Text {
-                        textFormat: Text.PlainText
-                        width: parent.width - Style.space(16)
-                        text: modelData.location
-                        color: modelData.meetingUrl ? Color.accent : Qt.darker(root.contentForeground, 1.6)
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.caption
-                        font.underline: Boolean(locMouse.containsMouse && modelData.meetingUrl)
-                        elide: Text.ElideRight
-
-                        MouseArea {
-                          id: locMouse
-                          anchors.fill: parent
-                          hoverEnabled: Boolean(modelData.meetingUrl)
-                          cursorShape: modelData.meetingUrl ? Qt.PointingHandCursor : Qt.ArrowCursor
-                          onClicked: {
-                            if (modelData.meetingUrl) {
-                              root.openExternalUrl(modelData.meetingUrl)
-                              root.close()
+                          MouseArea {
+                            id: locMouse
+                            anchors.fill: parent
+                            hoverEnabled: Boolean(modelData.meetingUrl)
+                            cursorShape: modelData.meetingUrl ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: {
+                              if (modelData.meetingUrl) {
+                                root.openExternalUrl(modelData.meetingUrl)
+                                root.close()
+                              }
                             }
                           }
                         }
                       }
-                    }
 
-                    // One-Click Join Meeting Link
-                    Row {
-                      visible: root.enableMeetingLinks && Boolean(modelData.meetingUrl && modelData.meetingUrl.length > 0)
-                      spacing: Style.space(6)
-                      topPadding: Style.space(3)
+                      // One-Click Join Meeting Link
+                      Row {
+                        visible: root.enableMeetingLinks && Boolean(modelData.meetingUrl && modelData.meetingUrl.length > 0)
+                        spacing: Style.space(6)
+                        topPadding: Style.space(3)
 
-                      Rectangle {
-                        id: joinBtn
-                        width: joinRow.implicitWidth + Style.space(16)
-                        height: Style.space(22)
-                        radius: Style.cornerRadius > 0 ? 4 : 0
-                        color: joinMouse.containsMouse ? Color.accent : Style.hoverFillFor(root.contentForeground, Color.accent)
-                        border.width: 1
-                        border.color: Color.accent
+                        Rectangle {
+                          id: joinBtn
+                          width: joinRow.implicitWidth + Style.space(16)
+                          height: Style.space(22)
+                          radius: Style.cornerRadius > 0 ? 4 : 0
+                          color: joinMouse.containsMouse ? Color.accent : Style.hoverFillFor(root.contentForeground, Color.accent)
+                          border.width: 1
+                          border.color: Color.accent
 
-                        Row {
-                          id: joinRow
-                          anchors.centerIn: parent
-                          spacing: Style.space(5)
+                          Row {
+                            id: joinRow
+                            anchors.centerIn: parent
+                            spacing: Style.space(5)
 
-                          Text {
-                            textFormat: Text.PlainText
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "󰕧"
-                            color: joinMouse.containsMouse ? Color.background : Color.accent
-                            font.family: root.contentFontFamily
-                            font.pixelSize: Style.font.caption
+                            Text {
+                              textFormat: Text.PlainText
+                              anchors.verticalCenter: parent.verticalCenter
+                              text: "󰕧"
+                              color: joinMouse.containsMouse ? Color.background : Color.accent
+                              font.family: root.contentFontFamily
+                              font.pixelSize: Style.font.caption
+                            }
+
+                            Text {
+                              textFormat: Text.PlainText
+                              anchors.verticalCenter: parent.verticalCenter
+                              text: modelData.meetingProvider ? "Join " + modelData.meetingProvider : "Join Meeting"
+                              color: joinMouse.containsMouse ? Color.background : root.contentForeground
+                              font.family: root.contentFontFamily
+                              font.pixelSize: Style.font.caption
+                              font.bold: true
+                            }
                           }
 
-                          Text {
-                            textFormat: Text.PlainText
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.meetingProvider ? "Join " + modelData.meetingProvider : "Join Meeting"
-                            color: joinMouse.containsMouse ? Color.background : root.contentForeground
-                            font.family: root.contentFontFamily
-                            font.pixelSize: Style.font.caption
-                            font.bold: true
+                          MouseArea {
+                            id: joinMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                              root.openExternalUrl(modelData.meetingUrl)
+                              root.close()
+                            }
                           }
-                        }
 
-                        MouseArea {
-                          id: joinMouse
-                          anchors.fill: parent
-                          hoverEnabled: true
-                          cursorShape: Qt.PointingHandCursor
-                          onClicked: {
-                            root.openExternalUrl(modelData.meetingUrl)
-                            root.close()
+                          PanelToolTip {
+                            text: modelData.meetingUrl
+                            fontFamily: root.contentFontFamily
                           }
-                        }
-
-                        PanelToolTip {
-                          text: modelData.meetingUrl
-                          fontFamily: root.contentFontFamily
                         }
                       }
                     }
